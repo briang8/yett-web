@@ -169,15 +169,42 @@ To test the platform, you can register new accounts:
 - Accessible forms with proper labeling
 
 ## Data Persistence
+The application uses PostgreSQL for persistent storage. A legacy
+`data.json` file was previously used for local development, but the project
+has been migrated to Postgres and the file-backed fallback has been removed.
 
-The application uses a file-based database (data.json) that stores:
-- User accounts and profiles
-- Learning modules and content
-- Mentorship requests and matches
-- Quiz questions and results
-- Progress tracking data
+To run Postgres locally and seed the database from the previous data file,
+follow these steps (run from the project root):
 
-This file is automatically created when you first start the backend server.
+1. Start a Postgres container (example):
+
+```bash
+docker run -d --name yett-postgres \
+	-e POSTGRES_PASSWORD=pass \
+	-e POSTGRES_DB=yett \
+	-p 5432:5432 \
+	postgres:15
+```
+
+2. Set the `DATABASE_URL` environment variable and run the migration script:
+
+```bash
+export DATABASE_URL="postgresql://postgres:pass@127.0.0.1:5432/yett"
+cd backend
+npm install
+npm run migrate:pg
+```
+
+3. Start the backend with the same `DATABASE_URL` set:
+
+```bash
+export DATABASE_URL="postgresql://postgres:pass@127.0.0.1:5432/yett"
+node server.js
+```
+
+After the migration completes, the database will contain users, modules,
+opportunities, mentorship requests, and matches. The server requires
+`DATABASE_URL` to run and will exit with a clear message if it is not set.
 
 ## Security Considerations
 

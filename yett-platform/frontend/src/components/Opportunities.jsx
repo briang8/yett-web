@@ -5,6 +5,9 @@ function Opportunities({ user, token, showToast }) {
   const [opps, setOpps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [respondingId, setRespondingId] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
 
   useEffect(() => {
     loadOpportunities();
@@ -35,6 +38,23 @@ function Opportunities({ user, token, showToast }) {
     }
   };
 
+  const handleCreate = async (e) => {
+    e && e.preventDefault();
+    if (!title || !description) return showToast('Title and description required', 'error');
+    setCreating(true);
+    try {
+      await api.createOpportunity({ title, description }, token);
+      setTitle('');
+      setDescription('');
+      showToast('Opportunity created', 'success');
+      await loadOpportunities();
+    } catch (err) {
+      showToast(err.message || 'Failed to create opportunity', 'error');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   if (loading) return (
     <div className="loading"><div className="spinner"></div><p>Loading opportunities...</p></div>
   );
@@ -48,10 +68,32 @@ function Opportunities({ user, token, showToast }) {
         </div>
 
         {opps.length === 0 ? (
-          <div className="empty-state">
-            <h3 className="empty-state-title">No opportunities yet</h3>
-            <p>Mentors can post offers; check back soon.</p>
-          </div>
+          <>
+            {user.role === 'mentor' && (
+              <div style={{ marginBottom: '1rem' }}>
+                <div className="card">
+                  <h3>Create Opportunity</h3>
+                  <form onSubmit={handleCreate}>
+                    <div className="form-group">
+                      <label className="form-label">Title</label>
+                      <input className="form-input" value={title} onChange={(e) => setTitle(e.target.value)} required />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Description</label>
+                      <textarea className="form-textarea" value={description} onChange={(e) => setDescription(e.target.value)} required />
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                      <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? 'Creating...' : 'Create Offer'}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+            <div className="empty-state">
+              <h3 className="empty-state-title">No opportunities yet</h3>
+              <p>{user.role === 'mentor' ? 'Create an opportunity using the form above.' : 'Mentors can post offers; check back soon.'}</p>
+            </div>
+          </>
         ) : (
           <div className="grid grid-2">
             {opps.map(opp => (

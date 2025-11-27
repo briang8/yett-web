@@ -591,15 +591,16 @@ h4 {
 }
 
 .toast-success {
-  border-left: 4px solid var(--success);
+  /* intentionally plain appearance: no colored accent */
+  border-left: none;
 }
 
 .toast-error {
-  border-left: 4px solid var(--error);
+  border-left: none;
 }
 
 .toast-warning {
-  border-left: 4px solid var(--warning);
+  border-left: none;
 }
 
 /* Modal */
@@ -941,4 +942,3 @@ tbody tr:hover {
 
 .password-requirement.unmet {
   color: var(--text-lighter);
-}

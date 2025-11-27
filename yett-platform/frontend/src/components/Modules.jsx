@@ -135,7 +135,7 @@ function Modules({ user, token, updateUser, showToast }) {
 
         {modules.length === 0 && (
           <div className="empty-state">
-            <div className="empty-state-icon">📚</div>
+            <div className="empty-state-icon"></div>
             <h3 className="empty-state-title">No modules available yet</h3>
             <p>Check back soon for new learning content</p>
           </div>

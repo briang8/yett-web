@@ -7,6 +7,7 @@ function Dashboard({ user, token, updateUser, showToast }) {
   const [requests, setRequests] = useState([]);
   const [users, setUsers] = useState([]);
   const [mentorsList, setMentorsList] = useState([]);
+
   const [recommendModal, setRecommendModal] = useState({ open: false, learner: null, mentorId: '', message: '' });
   const [userProfile, setUserProfile] = useState(null);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -41,13 +42,14 @@ function Dashboard({ user, token, updateUser, showToast }) {
         setRequests(requestsData);
       }
 
-      // Load users if admin
+      // Load users and stats if admin
       if (user.role === 'admin') {
         const usersData = await api.getAdminUsers(token);
         setUsers(usersData);
         // load mentors for admin recommendation dropdown
         const mentors = await api.getMentors();
         setMentorsList(mentors);
+        // admin stats UI removed per request
       }
     } catch (error) {
       showToast(error.message || 'Failed to load data', 'error');
@@ -279,7 +281,7 @@ function Dashboard({ user, token, updateUser, showToast }) {
       <div className="dashboard section">
         <div className="container">
           <div className="dashboard-header">
-            <h1 className="dashboard-greeting">Welcome, {user.name}! 🎓</h1>
+            <h1 className="dashboard-greeting">Welcome, {user.name}!</h1>
             <p style={{ color: 'var(--text-light)' }}>Help guide the next generation</p>
           </div>
 
@@ -368,21 +370,7 @@ function Dashboard({ user, token, updateUser, showToast }) {
             <p style={{ color: 'var(--text-light)' }}>Manage the YETT platform</p>
           </div>
 
-          <h3 style={{ marginBottom: '1rem' }}>Platform Statistics</h3>
-          <div className="grid grid-3" style={{ marginBottom: '2rem' }}>
-            <div className="card">
-              <div className="stat-value">{users.length}</div>
-              <div className="stat-label">Total Users</div>
-            </div>
-            <div className="card">
-              <div className="stat-value">{modules.length}</div>
-              <div className="stat-label">Modules</div>
-            </div>
-            <div className="card">
-              <div className="stat-value">{Math.round(users.reduce((sum, u) => sum + u.progress, 0) / users.length) || 0}%</div>
-              <div className="stat-label">Avg Progress</div>
-            </div>
-          </div>
+
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h3>Module Management</h3>

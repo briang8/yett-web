@@ -190,7 +190,7 @@ function Mentors({ user, token, showToast }) {
 
         {mentors.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon">👥</div>
+            <div className="empty-state-icon"></div>
             <h3 className="empty-state-title">No mentors available yet</h3>
             <p>Check back soon to connect with mentors</p>
           </div>

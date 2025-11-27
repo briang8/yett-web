@@ -37,7 +37,7 @@ function Home({ user }) {
               <div style={{ fontSize: '3rem', marginBottom: '1rem' }}></div>
               <h3>Digital Literacy</h3>
               <p className="card-text">
-                Access structured learning modules covering computer basics, coding, productivity tools, and more.
+                Access structured learning modules covering computer basics, coding, Internet Safety Campaigns, and more.
               </p>
             </div>
             <div className="card">
@@ -63,7 +63,7 @@ function Home({ user }) {
           <h2 style={{ textAlign: 'center', marginBottom: '2rem' }}>Our Mission</h2>
           <div style={{ maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
             <p style={{ fontSize: '1.125rem', color: 'var(--text-light)', lineHeight: '1.8' }}>
-              YETT aims to bridge the digital divide in Africa by providing underserved youth with the tools,
+              YETT aims to bridge the digital divide in Africa by providing the underserved youth with the tools,
               knowledge, and support they need to thrive in the digital economy. We believe that with the right
               resources and guidance, every young person has limitless potential.
             </p>

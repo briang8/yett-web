@@ -3,119 +3,100 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const fs = require('fs');
-const path = require('path');
+// Legacy file-backed storage removed. Postgres is required; file I/O imports removed.
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'demo-secret-key-change-in-production';
-const DATA_FILE = path.join(__dirname, 'data.json');
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Initialize data file with seed data
-function initializeData() {
-    const seedData = {
-        users: [
-            {
-                id: 'admin-001',
-                name: 'Admin User',
-                email: 'admin@yett.com',
-                role: 'admin',
-                completedModules: [],
-                createdAt: new Date().toISOString()
-            },
-            {
-                id: 'mentor-001',
-                name: 'Sarah Mentor',
-                email: 'mentor@yett.com',
-                role: 'mentor',
-                completedModules: [],
-                createdAt: new Date().toISOString()
-            },
-            {
-                id: 'learner-001',
-                name: 'John Learner',
-                email: 'learner@yett.com',
-                role: 'learner',
-                completedModules: [],
-                createdAt: new Date().toISOString()
-            }
-        ],
-        modules: [
-            {
-                id: 'mod-001',
-                title: 'Basic Computer Skills',
-                description: 'Learn fundamental computer operations, file management, and basic troubleshooting.',
-                contentUrl: 'https://www.youtube.com/watch?v=xxwT5YJb7yE',
-                duration: '45 minutes',
-                difficulty: 'Beginner'
-            },
-            {
-                id: 'mod-002',
-                title: 'Internet & Online Safety',
-                description: 'Understand how to navigate the internet safely, protect your privacy, and identify scams.',
-                contentUrl: 'https://www.youtube.com/watch?v=U3W2v7LN-88',
-                duration: '30 minutes',
-                difficulty: 'Beginner'
-            },
-            {
-                id: 'mod-003',
-                title: 'Introduction to Coding',
-                description: 'Start your coding journey with block-based programming and basic concepts.',
-                contentUrl: 'https://www.youtube.com/watch?v=nKIu9yen5nc',
-                duration: '60 minutes',
-                difficulty: 'Beginner'
-            },
-            {
-                id: 'mod-004',
-                title: 'Productivity Tools',
-                description: 'Master essential tools like Google Docs, Sheets, and professional email communication.',
-                contentUrl: 'https://www.youtube.com/watch?v=YQoryp8TjMw',
-                duration: '50 minutes',
-                difficulty: 'Intermediate'
-            },
-            {
-                id: 'mod-005',
-                title: 'Career Readiness',
-                description: 'Learn how to write a CV, prepare for interviews, and present yourself professionally.',
-                contentUrl: 'https://www.youtube.com/watch?v=ji5_MqicxSo',
-                duration: '40 minutes',
-                difficulty: 'Intermediate'
-            },
-            {
-                id: 'mod-006',
-                title: 'Build Your First Webpage',
-                description: 'Create a simple personal webpage using HTML and CSS. Hands-on project.',
-                contentUrl: 'https://www.youtube.com/watch?v=PlxWf493en4',
-                duration: '90 minutes',
-                difficulty: 'Intermediate'
-            }
-        ],
-        mentorshipRequests: [],
-        opportunities: [],
-        matches: []
-    };
+// Legacy file-backed storage removed. Postgres is required; file I/O and
+// the data.json initialization logic have been removed.
 
-    if (!fs.existsSync(DATA_FILE)) {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(seedData, null, 2));
-        console.log('✅ Data file initialized with seed data');
+// Postgres helper (used when DATABASE_URL is provided)
+const dbPg = require('./db_pg');
+const USE_PG = !!process.env.DATABASE_URL;
+
+// Enforce Postgres-only mode. Previously the server fell back to a file-backed
+// `data.json`. After migrating to Postgres we require `DATABASE_URL` to be set
+// so all reads/writes go to the database. Exit early with a clear message if
+// the environment is not configured.
+if (!USE_PG) {
+    console.error('ERROR: DATABASE_URL not set. This server requires Postgres. Set DATABASE_URL and restart.');
+    process.exit(1);
+}
+
+// Provide clear stubs for the legacy file-backed helpers. These should never
+// be called because the server enforces Postgres-only mode above. If any
+// leftover code paths attempt to use them, they will throw with a helpful
+// message so the issue is obvious during debugging.
+// File-backed helpers removed — server requires Postgres via DATABASE_URL.
+
+async function findUserByEmail(email) {
+    if (USE_PG) {
+        const rows = await dbPg.query('SELECT * FROM users WHERE email = $1', [email]);
+        return rows[0] || null;
     }
+    const data = readData();
+    return data.users.find(u => u.email === email) || null;
 }
 
-// Read data from file
-function readData() {
-    const rawData = fs.readFileSync(DATA_FILE);
-    return JSON.parse(rawData);
+async function createUserInDb(userObj) {
+    if (USE_PG) {
+        const sql = `INSERT INTO users (id, name, email, password, role, progress, completed_modules, created_at)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`;
+        await dbPg.query(sql, [userObj.id, userObj.name, userObj.email, userObj.password, userObj.role, userObj.progress || 0, JSON.stringify(userObj.completedModules || []), userObj.createdAt]);
+        return userObj;
+    }
+    const data = readData();
+    data.users.push(userObj);
+    writeData(data);
+    return userObj;
 }
 
-// Write data to file
-function writeData(data) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+async function getUserById(id) {
+    if (USE_PG) {
+        const rows = await dbPg.query('SELECT * FROM users WHERE id = $1', [id]);
+        return rows[0] || null;
+    }
+    const data = readData();
+    return data.users.find(u => u.id === id) || null;
 }
+
+async function listUsersWithProgress() {
+    if (USE_PG) {
+        const modules = await dbPg.query('SELECT COUNT(*)::int as count FROM modules');
+        const totalModules = modules[0] ? modules[0].count : 0;
+        const users = await dbPg.query('SELECT id, name, email, role, completed_modules, created_at FROM users ORDER BY created_at DESC');
+        return users.map(u => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            completedCount: Array.isArray(u.completed_modules) ? u.completed_modules.length : (u.completed_modules ? JSON.parse(u.completed_modules).length : 0),
+            totalModules,
+            progress: totalModules ? Math.round(((Array.isArray(u.completed_modules) ? u.completed_modules.length : (u.completed_modules ? JSON.parse(u.completed_modules).length : 0)) / totalModules) * 100) : 0,
+            createdAt: u.created_at
+        }));
+    }
+    const data = readData();
+    const totalModules = data.modules.length;
+    return data.users.map(user => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        completedCount: user.completedModules.length,
+        totalModules,
+        progress: Math.round((user.completedModules.length / totalModules) * 100),
+        createdAt: user.createdAt
+    }));
+}
+
 
 // Auth middleware
 function authenticateToken(req, res, next) {
@@ -146,7 +127,7 @@ function requireAdmin(req, res, next) {
 // ===== AUTH ROUTES =====
 
 // Register (public) — password required, admin creation disallowed
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
     try {
         const { name, email, role, password } = req.body;
 
@@ -162,12 +143,9 @@ app.post('/api/register', (req, res) => {
             return res.status(400).json({ error: 'Password must be at least 8 characters long' });
         }
 
-        const data = readData();
-
-        // Check if user already exists
-        if (data.users.find(u => u.email === email)) {
-            return res.status(400).json({ error: 'User with this email already exists' });
-        }
+        // Check if user already exists (DB or file)
+        const existing = await findUserByEmail(email);
+        if (existing) return res.status(400).json({ error: 'User with this email already exists' });
 
         const hashed = bcrypt.hashSync(password, 10);
 
@@ -181,8 +159,7 @@ app.post('/api/register', (req, res) => {
             createdAt: new Date().toISOString()
         };
 
-        data.users.push(newUser);
-        writeData(data);
+        await createUserInDb(newUser);
 
         const token = jwt.sign(
             { id: newUser.id, email: newUser.email, role: newUser.role },
@@ -202,7 +179,7 @@ app.post('/api/register', (req, res) => {
 });
 
 // Login with password
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -210,8 +187,7 @@ app.post('/api/login', (req, res) => {
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
-        const data = readData();
-        const user = data.users.find(u => u.email === email);
+        const user = await findUserByEmail(email);
 
         if (!user || !user.password) {
             return res.status(401).json({ error: 'Invalid email or password' });
@@ -238,19 +214,20 @@ app.post('/api/login', (req, res) => {
 });
 
 // Admin-only: create an admin account (requires existing admin)
-app.post('/api/admin/create-admin', authenticateToken, requireAdmin, (req, res) => {
+app.post('/api/admin/create-admin', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { name, email, password } = req.body;
         if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password required' });
         if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
 
-        const data = readData();
-        if (data.users.find(u => u.email === email)) return res.status(400).json({ error: 'User exists' });
+        const existing = await findUserByEmail(email);
+        if (existing) return res.status(400).json({ error: 'User exists' });
 
         const hashed = bcrypt.hashSync(password, 10);
         const newUser = { id: uuidv4(), name, email, role: 'admin', password: hashed, completedModules: [], createdAt: new Date().toISOString() };
-        data.users.push(newUser);
-        writeData(data);
+
+        await createUserInDb(newUser);
+
         res.status(201).json({ message: 'Admin created', user: { id: newUser.id, name: newUser.name, email: newUser.email } });
     } catch (err) {
         console.error(err);
@@ -261,8 +238,15 @@ app.post('/api/admin/create-admin', authenticateToken, requireAdmin, (req, res) 
 // ===== MODULES ROUTES =====
 
 // Get all modules
-app.get('/api/modules', (req, res) => {
+app.get('/api/modules', async (req, res) => {
     try {
+        if (USE_PG) {
+            const rows = await dbPg.query('SELECT id, title, description, content_url, duration, difficulty, created_at FROM modules ORDER BY created_at DESC');
+            // map content_url -> contentUrl for frontend compatibility
+            const mapped = rows.map(r => ({ id: r.id, title: r.title, description: r.description, contentUrl: r.content_url, duration: r.duration, difficulty: r.difficulty, createdAt: r.created_at }));
+            return res.json(mapped);
+        }
+
         const data = readData();
         res.json(data.modules);
     } catch (error) {
@@ -272,8 +256,15 @@ app.get('/api/modules', (req, res) => {
 });
 
 // Get single module
-app.get('/api/modules/:id', (req, res) => {
+app.get('/api/modules/:id', async (req, res) => {
     try {
+        if (USE_PG) {
+            const rows = await dbPg.query('SELECT id, title, description, content_url, duration, difficulty, created_at FROM modules WHERE id = $1', [req.params.id]);
+            const m = rows[0];
+            if (!m) return res.status(404).json({ error: 'Module not found' });
+            return res.json({ id: m.id, title: m.title, description: m.description, contentUrl: m.content_url, duration: m.duration, difficulty: m.difficulty, createdAt: m.created_at });
+        }
+
         const data = readData();
         const module = data.modules.find(m => m.id === req.params.id);
 
@@ -289,10 +280,32 @@ app.get('/api/modules/:id', (req, res) => {
 });
 
 // Mark module as complete
-app.post('/api/modules/:id/complete', authenticateToken, (req, res) => {
+app.post('/api/modules/:id/complete', authenticateToken, async (req, res) => {
     try {
         const moduleId = req.params.id;
         const userId = req.user.id;
+
+        if (USE_PG) {
+            // verify module exists
+            const modRows = await dbPg.query('SELECT id FROM modules WHERE id = $1', [moduleId]);
+            if (!modRows[0]) return res.status(404).json({ error: 'Module not found' });
+
+            const userRows = await dbPg.query('SELECT id, completed_modules FROM users WHERE id = $1', [userId]);
+            const user = userRows[0];
+            if (!user) return res.status(404).json({ error: 'User not found' });
+
+            const completed = Array.isArray(user.completed_modules) ? user.completed_modules.slice() : (user.completed_modules ? JSON.parse(user.completed_modules) : []);
+            if (!completed.includes(moduleId)) {
+                completed.push(moduleId);
+                await dbPg.query('UPDATE users SET completed_modules = $1 WHERE id = $2', [JSON.stringify(completed), userId]);
+            }
+
+            const modulesCountRows = await dbPg.query('SELECT COUNT(*)::int as count FROM modules');
+            const totalModules = modulesCountRows[0] ? modulesCountRows[0].count : 0;
+            const progress = totalModules ? Math.round((completed.length / totalModules) * 100) : 0;
+
+            return res.json({ message: 'Module marked as complete', completedModules: completed, progress, totalModules });
+        }
 
         const data = readData();
         const user = data.users.find(u => u.id === userId);
@@ -323,6 +336,67 @@ app.post('/api/modules/:id/complete', authenticateToken, (req, res) => {
     } catch (error) {
         console.error('Complete module error:', error);
         res.status(500).json({ error: 'Failed to mark module as complete' });
+    }
+});
+
+// Admin: create a module
+app.post('/api/modules', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { title, description, contentUrl, duration, difficulty } = req.body;
+        if (!title) return res.status(400).json({ error: 'Title required' });
+
+        if (USE_PG) {
+            const id = uuidv4();
+            await dbPg.query('INSERT INTO modules (id, title, description, content_url, duration, difficulty, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, title, description || null, contentUrl || null, duration || null, difficulty || null, new Date().toISOString()]);
+            const rows = await dbPg.query('SELECT id, title, description, content_url, duration, difficulty, created_at FROM modules WHERE id = $1', [id]);
+            const m = rows[0];
+            return res.status(201).json({ message: 'Module created', module: { id: m.id, title: m.title, description: m.description, contentUrl: m.content_url, duration: m.duration, difficulty: m.difficulty, createdAt: m.created_at } });
+        }
+
+        const data = readData();
+        const m = { id: uuidv4(), title, description: description || '', contentUrl: contentUrl || '', duration: duration || '', difficulty: difficulty || '' };
+        data.modules.push(m);
+        writeData(data);
+        res.status(201).json({ message: 'Module created', module: m });
+    } catch (err) {
+        console.error('Create module error:', err);
+        res.status(500).json({ error: 'Failed to create module' });
+    }
+});
+
+// Admin: delete a module
+app.delete('/api/modules/:id', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const id = req.params.id;
+        if (USE_PG) {
+            await dbPg.query('DELETE FROM modules WHERE id = $1', [id]);
+            // Optionally remove from users' completed_modules
+            const users = await dbPg.query('SELECT id, completed_modules FROM users');
+            for (const u of users) {
+                const completed = Array.isArray(u.completed_modules) ? u.completed_modules.slice() : (u.completed_modules ? JSON.parse(u.completed_modules) : []);
+                const idx = completed.indexOf(id);
+                if (idx !== -1) {
+                    completed.splice(idx, 1);
+                    await dbPg.query('UPDATE users SET completed_modules = $1 WHERE id = $2', [JSON.stringify(completed), u.id]);
+                }
+            }
+            return res.json({ message: 'Module deleted' });
+        }
+
+        const data = readData();
+        const idx = data.modules.findIndex(m => m.id === id);
+        if (idx === -1) return res.status(404).json({ error: 'Module not found' });
+        data.modules.splice(idx, 1);
+        // remove from users' completedModules
+        data.users.forEach(u => {
+            const i = u.completedModules.indexOf(id);
+            if (i !== -1) u.completedModules.splice(i, 1);
+        });
+        writeData(data);
+        res.json({ message: 'Module deleted' });
+    } catch (err) {
+        console.error('Delete module error:', err);
+        res.status(500).json({ error: 'Failed to delete module' });
     }
 });
 
@@ -396,8 +470,18 @@ function generateDeterministicQuiz(module, data) {
     return { title: module.title, questions };
 }
 
-app.get('/api/modules/:id/quiz', authenticateToken, (req, res) => {
+app.get('/api/modules/:id/quiz', authenticateToken, async (req, res) => {
     try {
+        if (USE_PG) {
+            const modulesRows = await dbPg.query('SELECT id, title, description, content_url, duration, difficulty FROM modules ORDER BY created_at');
+            const modules = modulesRows.map(m => ({ id: m.id, title: m.title, description: m.description, contentUrl: m.content_url, duration: m.duration, difficulty: m.difficulty }));
+            const module = modules.find(m => m.id === req.params.id);
+            if (!module) return res.status(404).json({ error: 'Module not found' });
+            const quiz = generateDeterministicQuiz(module, { modules });
+            const publicQuiz = { title: quiz.title, questions: quiz.questions.map(q => ({ question: q.question, options: q.options })) };
+            return res.json(publicQuiz);
+        }
+
         const data = readData();
         const module = data.modules.find(m => m.id === req.params.id);
         if (!module) return res.status(404).json({ error: 'Module not found' });
@@ -412,24 +496,29 @@ app.get('/api/modules/:id/quiz', authenticateToken, (req, res) => {
     }
 });
 
-app.post('/api/modules/:id/quiz/submit', authenticateToken, (req, res) => {
+app.post('/api/modules/:id/quiz/submit', authenticateToken, async (req, res) => {
     try {
-        const data = readData();
-        const module = data.modules.find(m => m.id === req.params.id);
-        if (!module) return res.status(404).json({ error: 'Module not found' });
+        let module, dataObj;
+        if (USE_PG) {
+            const modulesRows = await dbPg.query('SELECT id, title, description, content_url, duration, difficulty FROM modules ORDER BY created_at');
+            const modules = modulesRows.map(m => ({ id: m.id, title: m.title, description: m.description, contentUrl: m.content_url, duration: m.duration, difficulty: m.difficulty }));
+            module = modules.find(m => m.id === req.params.id);
+            dataObj = { modules };
+            if (!module) return res.status(404).json({ error: 'Module not found' });
+        } else {
+            const data = readData();
+            module = data.modules.find(m => m.id === req.params.id);
+            dataObj = data;
+            if (!module) return res.status(404).json({ error: 'Module not found' });
+        }
 
-        const quiz = generateDeterministicQuiz(module, data);
+        const quiz = generateDeterministicQuiz(module, dataObj);
         const answers = req.body.answers || {};
 
         const results = quiz.questions.map((q, i) => {
             const a = typeof answers[i] !== 'undefined' ? Number(answers[i]) : null;
             const correct = a !== null && a === q.answerIndex;
-            return {
-                question: q.question,
-                selectedIndex: a,
-                correctIndex: q.answerIndex,
-                correct
-            };
+            return { question: q.question, selectedIndex: a, correctIndex: q.answerIndex, correct };
         });
 
         const score = results.reduce((s, r) => s + (r.correct ? 1 : 0), 0);
@@ -445,11 +534,21 @@ app.post('/api/modules/:id/quiz/submit', authenticateToken, (req, res) => {
 // ===== OPPORTUNITIES / MATCHES =====
 
 // Create opportunity (mentor only)
-app.post('/api/opportunities', authenticateToken, (req, res) => {
+app.post('/api/opportunities', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'mentor') return res.status(403).json({ error: 'Only mentors can create opportunities' });
         const { title, description, learnerId } = req.body;
         if (!title || !description) return res.status(400).json({ error: 'Title and description are required' });
+
+        if (USE_PG) {
+            const createdAt = new Date().toISOString();
+            const rows = await dbPg.query(
+                `INSERT INTO opportunities (id, mentor_id, title, description, learner_id, status, created_at)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+                [uuidv4(), req.user.id, title, description, learnerId || null, 'open', createdAt]
+            );
+            return res.status(201).json({ message: 'Opportunity created', opportunity: rows[0] });
+        }
 
         const data = readData();
         data.opportunities = data.opportunities || [];
@@ -475,8 +574,22 @@ app.post('/api/opportunities', authenticateToken, (req, res) => {
 });
 
 // List opportunities (filtered)
-app.get('/api/opportunities', authenticateToken, (req, res) => {
+app.get('/api/opportunities', authenticateToken, async (req, res) => {
     try {
+        if (USE_PG) {
+            let sql = 'SELECT * FROM opportunities';
+            const params = [];
+            if (req.user.role === 'mentor') {
+                sql += ' WHERE mentor_id = $1';
+                params.push(req.user.id);
+            } else if (req.user.role === 'learner') {
+                sql += ' WHERE (learner_id IS NULL OR learner_id = $1)';
+                params.push(req.user.id);
+            }
+            const rows = await dbPg.query(sql, params);
+            return res.json(rows);
+        }
+
         const data = readData();
         data.opportunities = data.opportunities || [];
         let list = data.opportunities;
@@ -490,11 +603,37 @@ app.get('/api/opportunities', authenticateToken, (req, res) => {
 });
 
 // Respond to opportunity (learner accepts/declines)
-app.post('/api/opportunities/:id/respond', authenticateToken, (req, res) => {
+app.post('/api/opportunities/:id/respond', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'learner') return res.status(403).json({ error: 'Only learners can respond to opportunities' });
         const { status } = req.body;
         if (!['accepted', 'declined'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+        if (USE_PG) {
+            // Fetch opportunity
+            const rows = await dbPg.query('SELECT * FROM opportunities WHERE id = $1', [req.params.id]);
+            const opp = rows[0];
+            if (!opp) return res.status(404).json({ error: 'Opportunity not found' });
+            if (opp.learner_id && opp.learner_id !== req.user.id) return res.status(403).json({ error: 'Not authorized for this opportunity' });
+
+            // Update status and possibly insert match inside a transaction
+            const client = await dbPg.pool.connect();
+            try {
+                await client.query('BEGIN');
+                const upd = await client.query('UPDATE opportunities SET status = $1 WHERE id = $2 RETURNING *', [status, req.params.id]);
+                if (status === 'accepted') {
+                    await client.query('INSERT INTO matches (id, mentor_id, learner_id, opportunity_id, created_at) VALUES ($1,$2,$3,$4,$5)', [uuidv4(), opp.mentor_id, req.user.id, opp.id, new Date().toISOString()]);
+                }
+                await client.query('COMMIT');
+                const updatedOpp = upd.rows[0];
+                return res.json({ message: 'Response recorded', opportunity: updatedOpp });
+            } catch (e) {
+                await client.query('ROLLBACK');
+                throw e;
+            } finally {
+                client.release();
+            }
+        }
 
         const data = readData();
         const opp = data.opportunities.find(o => o.id === req.params.id);
@@ -521,8 +660,22 @@ app.post('/api/opportunities/:id/respond', authenticateToken, (req, res) => {
 });
 
 // Get matches
-app.get('/api/matches', authenticateToken, (req, res) => {
+app.get('/api/matches', authenticateToken, async (req, res) => {
     try {
+        if (USE_PG) {
+            let sql = 'SELECT * FROM matches';
+            const params = [];
+            if (req.user.role === 'mentor') {
+                sql += ' WHERE mentor_id = $1';
+                params.push(req.user.id);
+            } else if (req.user.role === 'learner') {
+                sql += ' WHERE learner_id = $1';
+                params.push(req.user.id);
+            }
+            const rows = await dbPg.query(sql, params);
+            return res.json(rows);
+        }
+
         const data = readData();
         data.matches = data.matches || [];
         let list = data.matches;
@@ -536,9 +689,23 @@ app.get('/api/matches', authenticateToken, (req, res) => {
 });
 
 // Mentor: view high-performing learners
-app.get('/api/mentors/top-learners', authenticateToken, (req, res) => {
+app.get('/api/mentors/top-learners', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'mentor') return res.status(403).json({ error: 'Mentor access required' });
+        if (USE_PG) {
+            const totalRows = await dbPg.query('SELECT COUNT(*)::int as count FROM modules');
+            const totalModules = totalRows[0] ? totalRows[0].count : 1;
+            const learners = await dbPg.query("SELECT id, name, email, completed_modules FROM users WHERE role = 'learner'");
+            const mapped = learners.map(u => {
+                const completed = Array.isArray(u.completed_modules) ? u.completed_modules : (u.completed_modules ? JSON.parse(u.completed_modules) : []);
+                const completedCount = completed.length;
+                const progress = totalModules ? Math.round((completedCount / totalModules) * 100) : 0;
+                return { id: u.id, name: u.name, email: u.email, completedCount, progress };
+            });
+            mapped.sort((a, b) => b.progress - a.progress);
+            return res.json(mapped.slice(0, 10));
+        }
+
         const data = readData();
         const totalModules = data.modules.length || 1;
         const learners = data.users.filter(u => u.role === 'learner').map(u => ({
@@ -559,8 +726,12 @@ app.get('/api/mentors/top-learners', authenticateToken, (req, res) => {
 // ===== MENTORSHIP ROUTES =====
 
 // Get all mentors
-app.get('/api/mentors', (req, res) => {
+app.get('/api/mentors', async (req, res) => {
     try {
+        if (USE_PG) {
+            const rows = await dbPg.query("SELECT id, name, email, role, created_at FROM users WHERE role = 'mentor'");
+            return res.json(rows.map(r => ({ id: r.id, name: r.name, email: r.email, role: r.role, createdAt: r.created_at })));
+        }
         const data = readData();
         const mentors = data.users.filter(u => u.role === 'mentor');
         res.json(mentors);
@@ -571,13 +742,23 @@ app.get('/api/mentors', (req, res) => {
 });
 
 // Create mentorship request
-app.post('/api/mentorship/request', authenticateToken, (req, res) => {
+app.post('/api/mentorship/request', authenticateToken, async (req, res) => {
     try {
         const { mentorId, topic } = req.body;
         const userId = req.user.id;
 
         if (!mentorId || !topic) {
             return res.status(400).json({ error: 'Mentor ID and topic are required' });
+        }
+
+        if (USE_PG) {
+            const mentorRows = await dbPg.query('SELECT id FROM users WHERE id = $1 AND role = $2', [mentorId, 'mentor']);
+            if (!mentorRows[0]) return res.status(404).json({ error: 'Mentor not found' });
+            const id = uuidv4();
+            const createdAt = new Date().toISOString();
+            await dbPg.query('INSERT INTO mentorship_requests (id, user_id, mentor_id, topic, status, created_at) VALUES ($1,$2,$3,$4,$5,$6)', [id, userId, mentorId, topic, 'pending', createdAt]);
+            const rows = await dbPg.query('SELECT * FROM mentorship_requests WHERE id = $1', [id]);
+            return res.status(201).json({ message: 'Mentorship request created', request: rows[0] });
         }
 
         const data = readData();
@@ -599,10 +780,7 @@ app.post('/api/mentorship/request', authenticateToken, (req, res) => {
         data.mentorshipRequests.push(newRequest);
         writeData(data);
 
-        res.status(201).json({
-            message: 'Mentorship request created',
-            request: newRequest
-        });
+        res.status(201).json({ message: 'Mentorship request created', request: newRequest });
     } catch (error) {
         console.error('Create mentorship request error:', error);
         res.status(500).json({ error: 'Failed to create mentorship request' });
@@ -610,30 +788,48 @@ app.post('/api/mentorship/request', authenticateToken, (req, res) => {
 });
 
 // Get mentorship requests (for learner or mentor)
-app.get('/api/mentorship/requests', authenticateToken, (req, res) => {
+app.get('/api/mentorship/requests', authenticateToken, async (req, res) => {
     try {
-        const data = readData();
         const userId = req.user.id;
         const userRole = req.user.role;
 
+        if (USE_PG) {
+            let sql = 'SELECT * FROM mentorship_requests';
+            const params = [];
+            if (userRole === 'learner') {
+                sql += ' WHERE user_id = $1';
+                params.push(userId);
+            } else if (userRole === 'mentor') {
+                sql += ' WHERE mentor_id = $1';
+                params.push(userId);
+            }
+            const reqs = await dbPg.query(sql, params);
+            const enriched = [];
+            for (const r of reqs) {
+                const learner = (await dbPg.query('SELECT id, name FROM users WHERE id = $1', [r.user_id]))[0];
+                const mentor = (await dbPg.query('SELECT id, name FROM users WHERE id = $1', [r.mentor_id]))[0];
+                enriched.push({ ...r, learnerName: learner?.name, mentorName: mentor?.name });
+            }
+            return res.json(enriched);
+        }
+
+        const data = readData();
+        const userIdLocal = req.user.id;
+        const userRoleLocal = req.user.role;
+
         let requests;
-        if (userRole === 'learner') {
-            requests = data.mentorshipRequests.filter(r => r.userId === userId);
-        } else if (userRole === 'mentor') {
-            requests = data.mentorshipRequests.filter(r => r.mentorId === userId);
+        if (userRoleLocal === 'learner') {
+            requests = data.mentorshipRequests.filter(r => r.userId === userIdLocal);
+        } else if (userRoleLocal === 'mentor') {
+            requests = data.mentorshipRequests.filter(r => r.mentorId === userIdLocal);
         } else {
             requests = data.mentorshipRequests;
         }
 
-        // Enrich with user data
-        const enrichedRequests = requests.map(req => {
-            const learner = data.users.find(u => u.id === req.userId);
-            const mentor = data.users.find(u => u.id === req.mentorId);
-            return {
-                ...req,
-                learnerName: learner?.name,
-                mentorName: mentor?.name
-            };
+        const enrichedRequests = requests.map(reqObj => {
+            const learner = data.users.find(u => u.id === reqObj.userId);
+            const mentor = data.users.find(u => u.id === reqObj.mentorId);
+            return { ...reqObj, learnerName: learner?.name, mentorName: mentor?.name };
         });
 
         res.json(enrichedRequests);
@@ -644,7 +840,7 @@ app.get('/api/mentorship/requests', authenticateToken, (req, res) => {
 });
 
 // Update mentorship request status
-app.put('/api/mentorship/requests/:id', authenticateToken, (req, res) => {
+app.put('/api/mentorship/requests/:id', authenticateToken, async (req, res) => {
     try {
         const { status } = req.body;
         const requestId = req.params.id;
@@ -653,25 +849,26 @@ app.put('/api/mentorship/requests/:id', authenticateToken, (req, res) => {
             return res.status(400).json({ error: 'Invalid status' });
         }
 
+        if (USE_PG) {
+            const rows = await dbPg.query('SELECT * FROM mentorship_requests WHERE id = $1', [requestId]);
+            const request = rows[0];
+            if (!request) return res.status(404).json({ error: 'Request not found' });
+            if (req.user.role === 'mentor' && request.mentor_id !== req.user.id) return res.status(403).json({ error: 'Not authorized to update this request' });
+            await dbPg.query('UPDATE mentorship_requests SET status = $1 WHERE id = $2', [status, requestId]);
+            const updated = (await dbPg.query('SELECT * FROM mentorship_requests WHERE id = $1', [requestId]))[0];
+            return res.json({ message: 'Request updated successfully', request: updated });
+        }
+
         const data = readData();
         const request = data.mentorshipRequests.find(r => r.id === requestId);
 
-        if (!request) {
-            return res.status(404).json({ error: 'Request not found' });
-        }
-
-        // Only mentor can update their requests
-        if (req.user.role === 'mentor' && request.mentorId !== req.user.id) {
-            return res.status(403).json({ error: 'Not authorized to update this request' });
-        }
+        if (!request) return res.status(404).json({ error: 'Request not found' });
+        if (req.user.role === 'mentor' && request.mentorId !== req.user.id) return res.status(403).json({ error: 'Not authorized to update this request' });
 
         request.status = status;
         writeData(data);
 
-        res.json({
-            message: 'Request updated successfully',
-            request
-        });
+        res.json({ message: 'Request updated successfully', request });
     } catch (error) {
         console.error('Update mentorship request error:', error);
         res.status(500).json({ error: 'Failed to update request' });
@@ -681,22 +878,34 @@ app.put('/api/mentorship/requests/:id', authenticateToken, (req, res) => {
 // ===== USER ROUTES =====
 
 // Get user profile
-app.get('/api/users/:id', authenticateToken, (req, res) => {
+app.get('/api/users/:id', authenticateToken, async (req, res) => {
     try {
-        const data = readData();
-        const user = data.users.find(u => u.id === req.params.id);
+        const user = await getUserById(req.params.id);
+        if (!user) return res.status(404).json({ error: 'User not found' });
 
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+        // get modules count
+        let totalModules = 0;
+        if (USE_PG) {
+            const m = await dbPg.query('SELECT COUNT(*)::int as count FROM modules');
+            totalModules = m[0] ? m[0].count : 0;
+        } else {
+            const data = readData();
+            totalModules = data.modules.length;
         }
 
-        const progress = Math.round((user.completedModules.length / data.modules.length) * 100);
+        const completed = USE_PG ? (Array.isArray(user.completed_modules) ? user.completed_modules : (user.completed_modules ? JSON.parse(user.completed_modules) : [])) : user.completedModules;
+        const progress = totalModules ? Math.round((completed.length / totalModules) * 100) : 0;
 
         res.json({
-            ...user,
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            completedModules: completed,
             progress,
-            totalModules: data.modules.length,
-            completedCount: user.completedModules.length
+            totalModules,
+            completedCount: completed.length,
+            createdAt: user.createdAt || user.created_at
         });
     } catch (error) {
         console.error('Get user error:', error);
@@ -705,13 +914,21 @@ app.get('/api/users/:id', authenticateToken, (req, res) => {
 });
 
 // Reset user progress
-app.post('/api/users/:id/reset-progress', authenticateToken, (req, res) => {
+app.post('/api/users/:id/reset-progress', authenticateToken, async (req, res) => {
     try {
         const userId = req.params.id;
 
         // Users can only reset their own progress (or admin can reset anyone's)
         if (req.user.id !== userId && req.user.role !== 'admin') {
             return res.status(403).json({ error: 'Not authorized to reset this user\'s progress' });
+        }
+
+        if (USE_PG) {
+            const rows = await dbPg.query('SELECT id FROM users WHERE id = $1', [userId]);
+            if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+            await dbPg.query('UPDATE users SET completed_modules = $1 WHERE id = $2', [JSON.stringify([]), userId]);
+            const updated = (await dbPg.query('SELECT id, name, email, role, completed_modules, created_at FROM users WHERE id = $1', [userId]))[0];
+            return res.json({ message: 'Progress reset successfully', user: updated });
         }
 
         const data = readData();
@@ -724,10 +941,7 @@ app.post('/api/users/:id/reset-progress', authenticateToken, (req, res) => {
         user.completedModules = [];
         writeData(data);
 
-        res.json({
-            message: 'Progress reset successfully',
-            user
-        });
+        res.json({ message: 'Progress reset successfully', user });
     } catch (error) {
         console.error('Reset progress error:', error);
         res.status(500).json({ error: 'Failed to reset progress' });
@@ -737,22 +951,9 @@ app.post('/api/users/:id/reset-progress', authenticateToken, (req, res) => {
 // ===== ADMIN ROUTES =====
 
 // Get all users with progress
-app.get('/api/admin/users', authenticateToken, requireAdmin, (req, res) => {
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        const data = readData();
-        const totalModules = data.modules.length;
-
-        const usersWithProgress = data.users.map(user => ({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            completedCount: user.completedModules.length,
-            totalModules,
-            progress: Math.round((user.completedModules.length / totalModules) * 100),
-            createdAt: user.createdAt
-        }));
-
+        const usersWithProgress = await listUsersWithProgress();
         res.json(usersWithProgress);
     } catch (error) {
         console.error('Get admin users error:', error);
@@ -761,12 +962,21 @@ app.get('/api/admin/users', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // Create new module (admin only)
-app.post('/api/admin/modules', authenticateToken, requireAdmin, (req, res) => {
+// Create new module (admin only)
+app.post('/api/admin/modules', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { title, description, contentUrl, duration, difficulty } = req.body;
 
         if (!title || !description) {
             return res.status(400).json({ error: 'Title and description are required' });
+        }
+
+        if (USE_PG) {
+            const id = uuidv4();
+            const createdAt = new Date().toISOString();
+            await dbPg.query('INSERT INTO modules (id, title, description, content_url, duration, difficulty, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, title, description || null, contentUrl || null, duration || null, difficulty || null, createdAt]);
+            const m = (await dbPg.query('SELECT id, title, description, content_url, duration, difficulty, created_at FROM modules WHERE id = $1', [id]))[0];
+            return res.status(201).json({ message: 'Module created successfully', module: { id: m.id, title: m.title, description: m.description, contentUrl: m.content_url, duration: m.duration, difficulty: m.difficulty, createdAt: m.created_at } });
         }
 
         const data = readData();
@@ -794,10 +1004,23 @@ app.post('/api/admin/modules', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // Admin: recommend a learner to a mentor (creates a mentorship request with status 'recommended')
-app.post('/api/admin/recommend', authenticateToken, requireAdmin, (req, res) => {
+app.post('/api/admin/recommend', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { learnerId, mentorId, message } = req.body;
         if (!learnerId || !mentorId) return res.status(400).json({ error: 'learnerId and mentorId are required' });
+
+        if (USE_PG) {
+            const learnerRows = await dbPg.query('SELECT id FROM users WHERE id = $1 AND role = $2', [learnerId, 'learner']);
+            const mentorRows = await dbPg.query('SELECT id FROM users WHERE id = $1 AND role = $2', [mentorId, 'mentor']);
+            if (!learnerRows[0]) return res.status(404).json({ error: 'Learner not found' });
+            if (!mentorRows[0]) return res.status(404).json({ error: 'Mentor not found' });
+            const id = uuidv4();
+            const createdAt = new Date().toISOString();
+            const topic = message || `Recommended by admin ${req.user.email}`;
+            await dbPg.query('INSERT INTO mentorship_requests (id, user_id, mentor_id, topic, status, admin_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, learnerId, mentorId, topic, 'recommended', req.user.id, createdAt]);
+            const rows = await dbPg.query('SELECT * FROM mentorship_requests WHERE id = $1', [id]);
+            return res.status(201).json({ message: 'Learner recommended to mentor', request: rows[0] });
+        }
 
         const data = readData();
         const learner = data.users.find(u => u.id === learnerId && u.role === 'learner');
@@ -828,8 +1051,12 @@ app.post('/api/admin/recommend', authenticateToken, requireAdmin, (req, res) => 
 });
 
 // Admin: list recommendations (mentorship requests created by admin)
-app.get('/api/admin/recommendations', authenticateToken, requireAdmin, (req, res) => {
+app.get('/api/admin/recommendations', authenticateToken, requireAdmin, async (req, res) => {
     try {
+        if (USE_PG) {
+            const rows = await dbPg.query('SELECT * FROM mentorship_requests WHERE admin_id IS NOT NULL');
+            return res.json(rows);
+        }
         const data = readData();
         const recs = (data.mentorshipRequests || []).filter(r => r.adminId);
         res.json(recs);
@@ -839,10 +1066,27 @@ app.get('/api/admin/recommendations', authenticateToken, requireAdmin, (req, res
     }
 });
 
+// (previously: admin platform statistics route - removed)
+
 // Delete module (admin only)
-app.delete('/api/admin/modules/:id', authenticateToken, requireAdmin, (req, res) => {
+app.delete('/api/admin/modules/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const moduleId = req.params.id;
+        if (USE_PG) {
+            await dbPg.query('DELETE FROM modules WHERE id = $1', [moduleId]);
+            // remove from users' completed_modules
+            const users = await dbPg.query('SELECT id, completed_modules FROM users');
+            for (const u of users) {
+                const completed = Array.isArray(u.completed_modules) ? u.completed_modules.slice() : (u.completed_modules ? JSON.parse(u.completed_modules) : []);
+                const idx = completed.indexOf(moduleId);
+                if (idx !== -1) {
+                    completed.splice(idx, 1);
+                    await dbPg.query('UPDATE users SET completed_modules = $1 WHERE id = $2', [JSON.stringify(completed), u.id]);
+                }
+            }
+            return res.json({ message: 'Module deleted successfully' });
+        }
+
         const data = readData();
 
         const moduleIndex = data.modules.findIndex(m => m.id === moduleId);
@@ -873,10 +1117,10 @@ app.get('/api/health', (req, res) => {
 });
 
 // Initialize and start server
-initializeData();
+// initializeData removed; database is seeded via migration scripts.
 
 app.listen(PORT, () => {
-    console.log(`🚀 YETT Backend running on http://localhost:${PORT}`);
-    console.log(`📊 Data file: ${DATA_FILE}`);
-    console.log(`🔑 JWT Secret configured: ${JWT_SECRET !== 'demo-secret-key-change-in-production' ? 'Yes' : 'No (using demo key)'}`);
+    console.log(` YETT Backend running on http://localhost:${PORT}`);
+    console.log(' Data storage: PostgreSQL (no local data.json)');
+    console.log(` JWT Secret configured: ${JWT_SECRET !== 'demo-secret-key-change-in-production' ? 'Yes' : 'No (using demo key)'}`);
 });
