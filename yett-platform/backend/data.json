@@ -1,6 +1,33 @@
 {
-  "users": [],
-  "modules": [],
+  "users": [
+    {
+      "id": "admin-001",
+      "name": "Admin User",
+      "email": "admin@yett.com",
+      "role": "admin",
+      "password": "$2a$10$99ld7XHxyf7QRwmA5.M33OBmCc6D.GDWpuR6vCl7RbN6zAt9ccEiy",
+      "completedModules": [],
+      "createdAt": "2025-11-27T03:46:17.925Z"
+    }
+  ],
+  "modules": [
+    {
+      "id": "mod-001",
+      "title": "Intro to programming",
+      "description": "Learn fundamental skills of programming",
+      "contentUrl": "https://www.w3schools.com/programming/index.php",
+      "duration": "30 days",
+      "difficulty": "Beginner"
+    },
+    {
+      "id": "mod-002",
+      "title": "Internet & Online Safety",
+      "description": "Online safety essentials",
+      "contentUrl": "https://www.netacad.com/courses/introduction-to-cybersecurity?courseLang=en-US",
+      "duration": "30 days",
+      "difficulty": "Intermediate"
+    }
+  ],
   "mentorshipRequests": [],
   "opportunities": [],
   "matches": []
